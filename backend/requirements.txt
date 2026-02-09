@@ -8,7 +8,9 @@ vanna[postgres,ollama]==0.7.9
 langchain
 langchain-community
 langchain-core
+langchain-huggingface
 langchain-postgres
+sentence-transformers
 # อื่นๆ
 google-cloud-bigquery
 pandas
