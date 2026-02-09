@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 from vanna.ollama import Ollama
-from vanna.postgres import Postgres_VectorStore
+from vanna.pgvector import PG_VectorStore
 
 app = FastAPI()
 
@@ -12,9 +12,9 @@ POSTGRES_URL = os.getenv('POSTGRES_URL', 'postgresql://admin:admin@db:5432/ai_co
 MODEL_NAME = 'qwen2.5:14b'
 
 # --- Vanna Setup ---
-class MyVanna(Postgres_VectorStore, Ollama):
+class MyVanna(PG_VectorStore, Ollama):
     def __init__(self, config=None):
-        Postgres_VectorStore.__init__(self, config=config)
+        PG_VectorStore.__init__(self, config=config)
         Ollama.__init__(self, config=config)
 
 # Initialize Vanna

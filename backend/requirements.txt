@@ -2,7 +2,9 @@ fastapi
 uvicorn
 python-dotenv
 psycopg2-binary
-vanna[postgres,ollama]
+vanna[postgres,ollama]==0.7.9
+langchain-core
+langchain-postgres
 google-cloud-bigquery
 pandas
 requests
