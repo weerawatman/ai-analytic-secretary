@@ -42,23 +42,16 @@ class MyVanna(PG_VectorStore, Ollama):
             raise e
 
 # Initialize Vanna (Global Instance)
-vn = None
-try:
-    # ส่งค่า config แบบ "หว่านแห" (ป้องกัน Vanna เปลี่ยนชื่อ key)
-    config_payload = {
-        'ollama_host': OLLAMA_HOST,
-        'model': MODEL_NAME,
-        'connection_string': POSTGRES_URL,         # ชื่อมาตรฐาน
-        'postgres_connection_string': POSTGRES_URL # ชื่อเผื่อเวอร์ชันเก่า
-    }
-    
-    vn = MyVanna(config=config_payload)
-    print("✅ Vanna initialized successfully")
+# ส่งค่า config แบบ "หว่านแห" (ป้องกัน Vanna เปลี่ยนชื่อ key)
+config_payload = {
+    'ollama_host': OLLAMA_HOST,
+    'model': MODEL_NAME,
+    'connection_string': POSTGRES_URL,         # ชื่อมาตรฐาน
+    'postgres_connection_string': POSTGRES_URL # ชื่อเผื่อเวอร์ชันเก่า
+}
 
-except Exception as e:
-    print(f"❌ Error initializing Vanna: {e}")
-    # อย่าเพิ่ง Crash โปรแกรม เพื่อให้เราอ่าน Log ได้
-    vn = None
+vn = MyVanna(config=config_payload)
+print("✅ Vanna initialized successfully")
 
 # --- API Models ---
 class Question(BaseModel):
