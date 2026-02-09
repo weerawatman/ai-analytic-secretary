@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ai_cockpit_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_cockpit}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    restart: always
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai_cockpit_brain
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: always
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  backend:
+    build: ./backend
+    container_name: ai_cockpit_api
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_URL=postgresql://admin:admin@db:5432/ai_cockpit
+      - OLLAMA_HOST=http://ollama:11434
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-service-account.json
+    depends_on:
+      - db
+      - ollama
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: ai_cockpit_ui
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000

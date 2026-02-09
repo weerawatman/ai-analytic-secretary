@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-dotenv
+psycopg2-binary
+vanna[postgres,ollama]
+google-cloud-bigquery
+pandas
+requests
