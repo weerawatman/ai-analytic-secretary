@@ -9,7 +9,7 @@ app = FastAPI()
 # --- Configuration ---
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://ollama:11434')
 POSTGRES_URL = os.getenv('POSTGRES_URL', 'postgresql://admin:admin@db:5432/ai_cockpit')
-MODEL_NAME = 'llama3'
+MODEL_NAME = 'qwen2.5:14b'
 
 # --- Vanna Setup ---
 class MyVanna(Postgres_VectorStore, Ollama):
