@@ -1,5 +1,7 @@
+import "./globals.css";
+
 export const metadata = {
-  title: "AI Analytic Secretary",
+  title: "AI Executive Cockpit",
   description: "AI-powered analytics dashboard",
 };
 
@@ -10,7 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-slate-900 text-white antialiased">{children}</body>
     </html>
   );
 }
