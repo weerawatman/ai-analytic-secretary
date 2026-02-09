@@ -224,5 +224,7 @@ gcp-service-account.json
 
 # Data Persistence (project-specific)
 ollama_data/
+!ollama_data/.gitkeep
 pgdata/
+!pgdata/.gitkeep
 *.sqlite3
