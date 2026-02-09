@@ -7,26 +7,57 @@ from vanna.pgvector import PG_VectorStore
 app = FastAPI()
 
 # --- Configuration ---
+# อ่านค่า Environment Variable
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://ollama:11434')
-POSTGRES_URL = os.getenv('POSTGRES_URL', 'postgresql://admin:admin@db:5432/ai_cockpit')
+# กำหนดค่า Default ให้ชัดเจน ถ้าอ่านจาก Env ไม่ได้
+POSTGRES_URL = os.getenv('POSTGRES_URL')
+if not POSTGRES_URL:
+    POSTGRES_URL = 'postgresql://admin:admin@db:5432/ai_cockpit'
+
 MODEL_NAME = 'qwen2.5:14b'
+
+# --- Debug Print (เช็คค่าก่อนเริ่มระบบ) ---
+print(f"DEBUG: --- Starting Vanna Initialization ---")
+print(f"DEBUG: Ollama Host: {OLLAMA_HOST}")
+print(f"DEBUG: Postgres URL: {POSTGRES_URL}")
+print(f"DEBUG: Model Name: {MODEL_NAME}")
 
 # --- Vanna Setup ---
 class MyVanna(PG_VectorStore, Ollama):
     def __init__(self, config=None):
-        PG_VectorStore.__init__(self, config=config)
-        Ollama.__init__(self, config=config)
+        if config is None:
+            config = {}
+        
+        # Print ดูว่า Config ที่ส่งเข้ามาหน้าตาเป็นยังไง
+        print(f"DEBUG: Init Config received: {config}")
 
-# Initialize Vanna
+        # Initialize ส่วนต่างๆ
+        try:
+            PG_VectorStore.__init__(self, config=config)
+            print("DEBUG: PG_VectorStore initialized OK")
+            Ollama.__init__(self, config=config)
+            print("DEBUG: Ollama initialized OK")
+        except Exception as e:
+            print(f"DEBUG: Error inside MyVanna __init__: {e}")
+            raise e
+
+# Initialize Vanna (Global Instance)
+vn = None
 try:
-    vn = MyVanna(config={
+    # ส่งค่า config แบบ "หว่านแห" (ป้องกัน Vanna เปลี่ยนชื่อ key)
+    config_payload = {
         'ollama_host': OLLAMA_HOST,
         'model': MODEL_NAME,
-        'postgres_connection_string': POSTGRES_URL
-    })
+        'connection_string': POSTGRES_URL,         # ชื่อมาตรฐาน
+        'postgres_connection_string': POSTGRES_URL # ชื่อเผื่อเวอร์ชันเก่า
+    }
+    
+    vn = MyVanna(config=config_payload)
     print("✅ Vanna initialized successfully")
+
 except Exception as e:
     print(f"❌ Error initializing Vanna: {e}")
+    # อย่าเพิ่ง Crash โปรแกรม เพื่อให้เราอ่าน Log ได้
     vn = None
 
 # --- API Models ---
@@ -35,23 +66,21 @@ class Question(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "AI Cockpit Backend is running", "model": MODEL_NAME}
+    status = "Running" if vn else "Error: Vanna not initialized"
+    return {"status": status, "model": MODEL_NAME}
 
 @app.post("/api/chat")
 def ask_ai(q: Question):
     if not vn:
-        raise HTTPException(status_code=500, detail="Vanna AI is not initialized properly")
-
+        raise HTTPException(status_code=500, detail="Vanna AI is not initialized properly. Check backend logs.")
+    
     try:
-        # Check if GCP credentials exist, if so try to connect (Mock/Real)
-        # For now, we just let Vanna generate SQL from Schema
+        # ถาม Vanna
         answer = vn.ask(question=q.question, print_results=False)
-
-        # Convert result to JSON serializable format if needed
         return {
             "question": q.question,
-            "answer": answer, # This might need parsing depending on Vanna version
-            "sql": "SELECT * FROM placeholder" # Vanna usually returns SQL separately
+            "answer": str(answer), 
+            "sql": "SQL log inside container" 
         }
     except Exception as e:
         return {"error": str(e)}

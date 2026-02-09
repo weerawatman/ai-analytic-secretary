@@ -2,9 +2,15 @@ fastapi
 uvicorn
 python-dotenv
 psycopg2-binary
+# ต้องมีวงเล็บ [postgres,ollama] ห้ามตกหล่น
 vanna[postgres,ollama]==0.7.9
+# ตระกูล LangChain
+langchain
+langchain-community
 langchain-core
 langchain-postgres
+# อื่นๆ
 google-cloud-bigquery
 pandas
 requests
+ollama
