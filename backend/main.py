@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import html
 import os
 import re
 import json
@@ -197,22 +198,40 @@ def chat(request: ChatRequest):
         sql = vn.generate_sql(question)
         df = vn.run_sql(sql)
 
+        # ── Safety Layer: Sanitize column names ──
+        # LLM may generate non-ASCII aliases (Thai/Chinese) that break the frontend.
+        # Force-rename to safe English keys: label, label_2, ... / value, value_2, ...
+        if df is not None and not df.empty:
+            new_cols = []
+            label_n = 0
+            value_n = 0
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    value_n += 1
+                    new_cols.append('value' if value_n == 1 else f'value_{value_n}')
+                else:
+                    label_n += 1
+                    new_cols.append('label' if label_n == 1 else f'label_{label_n}')
+            df.columns = new_cols
+
         data = []
         if df is not None and not df.empty:
             data = df.to_dict(orient='records')
 
+        # ── Instant Insight (Pure Python — zero LLM latency) ──
         analysis = None
-
-        # Generate analysis (with timeout)
-        if df is not None and not df.empty:
+        if df is not None and not df.empty and 'value' in df.columns and 'label' in df.columns:
             try:
-                df_summary = df.head(5).to_string(index=False)
-                prompt = (
-                    f"Data:\n{df_summary}\n\n"
-                    "Summarize this data in 1 very short Thai sentence. Focus on the top performer only."
+                top_record = df.sort_values(by='value', ascending=False).iloc[0]
+                total_val = df['value'].sum()
+                pct = (top_record['value'] / total_val * 100) if total_val > 0 else 0
+                label_safe = html.escape(str(top_record['label']))
+                analysis = (
+                    f"จากการวิเคราะห์ข้อมูล พบว่า <b>{label_safe}</b> "
+                    f"มียอดสูงสุดที่ <b>{top_record['value']:,.0f}</b> "
+                    f"({pct:.1f}%)<br>"
+                    f"ยอดรวมทั้งหมด: <b>{total_val:,.0f}</b>"
                 )
-                raw = vn.submit_prompt(prompt=prompt)
-                analysis = raw.strip() if raw else None
             except Exception:
                 pass
 

@@ -115,19 +115,20 @@ function AutoChart({ data }: { data: Record<string, unknown>[] }) {
   );
 }
 
-/* ── Insight Box Component ── */
+/* ── Executive Summary Card Component ── */
 function InsightBox({ analysis }: { analysis: string }) {
   return (
-    <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/20 text-emerald-400 text-xs">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5.002 5.002 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
+    <div className="mt-3 rounded-xl border border-indigo-500/20 bg-slate-800 p-4 shadow-lg shadow-indigo-500/5">
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-300 text-sm">
+          {"💡"}
         </span>
-        <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">AI Insight</span>
+        <span className="text-xs font-bold text-indigo-300 uppercase tracking-widest">Executive Summary</span>
       </div>
-      <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{analysis}</p>
+      <div
+        className="text-sm text-slate-100 leading-relaxed [&_b]:text-indigo-300 [&_b]:font-semibold"
+        dangerouslySetInnerHTML={{ __html: analysis }}
+      />
     </div>
   );
 }
@@ -391,7 +392,7 @@ export default function Home() {
           {isLoading && (
             <div className="flex justify-start">
               <div className="rounded-2xl rounded-bl-md bg-white/10 px-4 py-3 text-sm text-slate-400">
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span
                     className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"
@@ -401,7 +402,7 @@ export default function Home() {
                     className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"
                     style={{ animationDelay: "0.4s" }}
                   />
-                  <span className="ml-2">Thinking...</span>
+                  <span className="ml-2">Querying &amp; Analyzing...</span>
                 </span>
               </div>
             </div>
