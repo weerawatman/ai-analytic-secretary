@@ -11,6 +11,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
 } from "recharts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -20,7 +21,6 @@ interface Message {
   type?: "chat" | "data" | "error";
   message: string;
   analysis?: string;
-  columns?: string[];
   sql?: string;
   data?: Record<string, unknown>[];
 }
@@ -82,7 +82,7 @@ function AutoChart({ data }: { data: Record<string, unknown>[] }) {
     <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3 overflow-hidden">
       <ResponsiveContainer width="100%" height={320}>
         {chartConfig.type === "line" ? (
-          <LineChart data={chartData}>
+          <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
             <XAxis dataKey={chartConfig.xKey} tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
             <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
@@ -90,12 +90,13 @@ function AutoChart({ data }: { data: Record<string, unknown>[] }) {
               contentStyle={{ backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
               labelStyle={{ color: "#94a3b8" }}
             />
+            <Legend wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
             {chartConfig.yKeys.map((key, i) => (
-              <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+              <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} name={key} />
             ))}
           </LineChart>
         ) : (
-          <BarChart data={chartData}>
+          <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
             <XAxis dataKey={chartConfig.xKey} tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
             <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
@@ -103,8 +104,9 @@ function AutoChart({ data }: { data: Record<string, unknown>[] }) {
               contentStyle={{ backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
               labelStyle={{ color: "#94a3b8" }}
             />
+            <Legend wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
             {chartConfig.yKeys.map((key, i) => (
-              <Bar key={key} dataKey={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
+              <Bar key={key} dataKey={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} name={key} />
             ))}
           </BarChart>
         )}
@@ -219,9 +221,8 @@ export default function Home() {
         {
           role: "assistant",
           type: resData.type,
-          message: resData.message || resData.answer || "",
+          message: resData.message || "",
           analysis: resData.analysis || undefined,
-          columns: resData.columns || undefined,
           sql: resData.sql || undefined,
           data: resData.data || undefined,
         },

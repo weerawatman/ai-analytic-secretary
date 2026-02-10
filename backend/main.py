@@ -28,8 +28,10 @@ class MyVanna(Ollama, PG_VectorStore):
         # Define initial_prompt ONCE — used by get_sql_prompt below
         self.initial_prompt = (
             "You are a SQL expert that generates BigQuery-compatible SQL. "
-            "CRITICAL RULE: All SQL column aliases (AS ...) must be in Thai or English only. "
-            "Do NOT use Chinese characters in aliases or anywhere in the SQL output."
+            "CRITICAL RULE: STRICTLY use English snake_case for ALL SQL column aliases "
+            "(e.g., use `total_revenue` NOT `ยอดขาย`, use `customer_name` NOT `ชื่อลูกค้า`). "
+            "NEVER use Thai, Chinese, or any non-ASCII characters in SQL aliases, column names, "
+            "or table aliases. This is mandatory to prevent JSON parsing errors."
         )
 
         try:
@@ -186,7 +188,6 @@ def chat(request: ChatRequest):
             "type": "chat",
             "message": message,
             "sql": None,
-            "columns": [],
             "data": None,
             "analysis": None,
         })
@@ -197,10 +198,8 @@ def chat(request: ChatRequest):
         df = vn.run_sql(sql)
 
         data = []
-        columns = []
         if df is not None and not df.empty:
             data = df.to_dict(orient='records')
-            columns = list(df.columns)
 
         analysis = None
 
@@ -220,9 +219,8 @@ def chat(request: ChatRequest):
         # Serialize with default=str to handle datetime/Decimal from BigQuery
         response_data = json.loads(json.dumps({
             "type": "data",
-            "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
+            "message": "Analysis complete.",
             "sql": sql,
-            "columns": columns,
             "data": data,
             "analysis": analysis,
         }, default=str))
@@ -232,9 +230,8 @@ def chat(request: ChatRequest):
     except Exception as e:
         return JSONResponse(content={
             "type": "error",
-            "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
+            "message": f"Error processing query: {str(e)}",
             "sql": None,
-            "columns": [],
             "data": None,
             "analysis": None,
         })
