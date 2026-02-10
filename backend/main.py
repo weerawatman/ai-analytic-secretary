@@ -34,8 +34,8 @@ class MyVanna(Ollama, PG_VectorStore):
         except Exception as e:
             print(f"ERROR: Failed to connect to BigQuery: {e}")
 
-    def get_sql_prompt(self, question, question_sql_list, ddl_list, doc_list, **kwargs):
-        prompt = super().get_sql_prompt(question, question_sql_list, ddl_list, doc_list, **kwargs)
+    def get_sql_prompt(self, initial_prompt, question, question_sql_list, ddl_list, doc_list, **kwargs):
+        prompt = super().get_sql_prompt(initial_prompt, question, question_sql_list, ddl_list, doc_list, **kwargs)
         if prompt and prompt[0].get('role') == 'system':
             prompt[0]['content'] += (
                 "\n\nCRITICAL RULE: Strictly use only Thai or English for SQL Aliases. "

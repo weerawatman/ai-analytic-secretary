@@ -16,7 +16,13 @@
       "WebFetch(domain:vanna.ai)",
       "WebFetch(domain:ask.vanna.ai)",
       "WebFetch(domain:medium.com)",
-      "WebFetch(domain:try.vanna.ai)"
+      "WebFetch(domain:try.vanna.ai)",
+      "Bash(python -c:*)",
+      "Bash(python -m pip:*)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl:*)",
+      "Bash(docker exec:*)"
     ]
   }
 }
