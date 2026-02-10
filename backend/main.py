@@ -34,6 +34,15 @@ class MyVanna(Ollama, PG_VectorStore):
         except Exception as e:
             print(f"ERROR: Failed to connect to BigQuery: {e}")
 
+    def get_sql_prompt(self, question, question_sql_list, ddl_list, doc_list, **kwargs):
+        prompt = super().get_sql_prompt(question, question_sql_list, ddl_list, doc_list, **kwargs)
+        if prompt and prompt[0].get('role') == 'system':
+            prompt[0]['content'] += (
+                "\n\nCRITICAL RULE: Strictly use only Thai or English for SQL Aliases. "
+                "Do NOT use Chinese characters under any circumstances."
+            )
+        return prompt
+
     def run_sql(self, sql: str) -> pd.DataFrame:
         print(f"DEBUG: Executing SQL: {sql}")
         try:
@@ -186,10 +195,11 @@ def chat(request: ChatRequest):
             sql = vn.generate_sql(question)
             print(f"DEBUG: Generated SQL: {sql}")
             df = vn.run_sql(sql)
+            print(f"DEBUG: Dataframe rows: {len(df) if df is not None else 'None'}")
 
             data = []
             if df is not None and not df.empty:
-                data = df.astype(str).to_dict(orient='records')
+                data = df.to_dict(orient='records')
 
             # --- CHUNK 1: SQL + Data (sent immediately — no AI wait) ---
             yield json.dumps({
@@ -199,7 +209,7 @@ def chat(request: ChatRequest):
                 "data": data,
                 "analysis": None,
                 "chart": None,
-            }) + "\n"
+            }, default=str) + "\n"
 
             # --- CHUNK 2: Chart + Analysis (parallel AI, with timeout) ---
             if df is not None and not df.empty:
@@ -219,7 +229,7 @@ def chat(request: ChatRequest):
                     df_summary = df.head(5).to_string(index=False)
                     prompt = (
                         f"Data:\n{df_summary}\n\n"
-                        "Analyze this data in 1 short sentence (Thai). Be punchy."
+                        "Summarize this data in 1 very short Thai sentence. Focus on the top performer only."
                     )
                     return vn.submit_prompt(prompt=prompt)
 

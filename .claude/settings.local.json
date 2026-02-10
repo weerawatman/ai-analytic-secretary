@@ -4,7 +4,19 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(docker compose up:*)"
+      "Bash(docker compose up:*)",
+      "Bash(docker compose exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(python3:*)",
+      "Bash(/c/Python314/python:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.vanna.ai)",
+      "WebSearch",
+      "WebFetch(domain:vanna.ai)",
+      "WebFetch(domain:ask.vanna.ai)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:try.vanna.ai)"
     ]
   }
 }
