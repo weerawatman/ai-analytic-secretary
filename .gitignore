@@ -222,6 +222,8 @@ nul
 
 # Secrets & Credentials
 gcp-service-account.json
+service_account.json
+*.json
 
 # Data Persistence (project-specific)
 ollama_data/
