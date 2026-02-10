@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import re
 import json
+import warnings
 import concurrent.futures
 import pandas as pd
 import plotly
@@ -12,6 +13,8 @@ import plotly.express as px
 from vanna.ollama import Ollama
 from vanna.pgvector import PG_VectorStore
 from google.cloud import bigquery
+
+warnings.filterwarnings("ignore")
 
 # --- Configuration ---
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://ollama:11434')
@@ -22,36 +25,37 @@ ANALYSIS_TIMEOUT = 10  # seconds — skip AI tasks if they take longer
 # --- Custom Vanna Class ---
 class MyVanna(Ollama, PG_VectorStore):
     def __init__(self, config=None):
-        # Initialize parent classes
         Ollama.__init__(self, config=config)
         PG_VectorStore.__init__(self, config=config)
 
-        # Initialize BigQuery Client
-        try:
-            print("DEBUG: Connecting to BigQuery...")
-            self.bq_client = bigquery.Client.from_service_account_json('service_account.json')
-            print("DEBUG: BigQuery Connected Successfully.")
-        except Exception as e:
-            print(f"ERROR: Failed to connect to BigQuery: {e}")
+        # Define initial_prompt ONCE — used by get_sql_prompt below
+        self.initial_prompt = (
+            "You are a SQL expert that generates BigQuery-compatible SQL. "
+            "CRITICAL RULE: All SQL column aliases (AS ...) must be in Thai or English only. "
+            "Do NOT use Chinese characters in aliases or anywhere in the SQL output."
+        )
 
-    def get_sql_prompt(self, initial_prompt, question, question_sql_list, ddl_list, doc_list, **kwargs):
-        prompt = super().get_sql_prompt(initial_prompt, question, question_sql_list, ddl_list, doc_list, **kwargs)
-        if prompt and prompt[0].get('role') == 'system':
-            prompt[0]['content'] += (
-                "\n\nCRITICAL RULE: Strictly use only Thai or English for SQL Aliases. "
-                "Do NOT use Chinese characters under any circumstances."
-            )
-        return prompt
+        try:
+            self.bq_client = bigquery.Client.from_service_account_json('service_account.json')
+        except Exception:
+            self.bq_client = None
+
+    def get_sql_prompt(self, initial_prompt=None, question="", question_sql_list=None, ddl_list=None, doc_list=None, **kwargs):
+        """Always inject our own initial_prompt to prevent duplication."""
+        return super().get_sql_prompt(
+            initial_prompt=self.initial_prompt,
+            question=question,
+            question_sql_list=question_sql_list or [],
+            ddl_list=ddl_list or [],
+            doc_list=doc_list or [],
+            **kwargs,
+        )
 
     def run_sql(self, sql: str) -> pd.DataFrame:
-        print(f"DEBUG: Executing SQL: {sql}")
         try:
             job = self.bq_client.query(sql)
-            df = job.to_dataframe()
-            print(f"DEBUG: SQL Executed. Rows returned: {len(df)}")
-            return df
-        except Exception as e:
-            print(f"ERROR: SQL Execution failed: {e}")
+            return job.to_dataframe()
+        except Exception:
             return None
 
 # --- Setup Vanna ---
@@ -178,7 +182,7 @@ def chat(request: ChatRequest):
     question = request.question.strip()
     intent = classify_intent(question)
 
-    # --- Chat / Greeting (instant response) ---
+    # --- Chat / Greeting ---
     if intent == 'chat':
         message = generate_chat_response(question)
         return JSONResponse(content={
@@ -186,79 +190,79 @@ def chat(request: ChatRequest):
             "message": message,
             "sql": None,
             "data": None,
+            "analysis": None,
+            "chart": None,
         })
 
-    # --- Data Query (Streamed: data first, AI analysis second) ---
-    def stream_data():
-        try:
-            sql = vn.generate_sql(question)
-            df = vn.run_sql(sql)
+    # --- Data Query ---
+    try:
+        sql = vn.generate_sql(question)
+        df = vn.run_sql(sql)
 
-            data = []
-            if df is not None and not df.empty:
-                data = df.to_dict(orient='records')
+        data = []
+        if df is not None and not df.empty:
+            data = df.to_dict(orient='records')
 
-            # --- CHUNK 1: SQL + Data (sent immediately — no AI wait) ---
-            yield json.dumps({
-                "type": "data",
-                "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
-                "sql": sql,
-                "data": data,
-                "analysis": None,
-                "chart": None,
-            }, default=str) + "\n"
+        analysis = None
+        chart_json = None
 
-            # --- CHUNK 2: Chart + Analysis (parallel AI, with timeout) ---
-            if df is not None and not df.empty:
-                chart_json = None
-                analysis = None
+        # Generate chart + analysis in parallel (with timeout)
+        if df is not None and not df.empty:
+            def _gen_chart():
+                try:
+                    code = vn.generate_plotly_code(question=question, sql=sql, df=df)
+                    fig = vn.get_plotly_figure(plotly_code=code, df=df)
+                    return fig.to_json() if fig else None
+                except Exception:
+                    return None
 
-                def _gen_chart():
-                    try:
-                        code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-                        fig = vn.get_plotly_figure(plotly_code=code, df=df)
-                        return fig.to_json() if fig else None
-                    except Exception:
-                        return None
-
-                def _gen_analysis():
+            def _gen_analysis():
+                try:
                     df_summary = df.head(5).to_string(index=False)
                     prompt = (
                         f"Data:\n{df_summary}\n\n"
                         "Summarize this data in 1 very short Thai sentence. Focus on the top performer only."
                     )
-                    return vn.submit_prompt(prompt=prompt)
+                    raw = vn.submit_prompt(prompt=prompt)
+                    return raw.strip() if raw else None
+                except Exception:
+                    return None
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    chart_future = executor.submit(_gen_chart)
-                    analysis_future = executor.submit(_gen_analysis)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                chart_future = executor.submit(_gen_chart)
+                analysis_future = executor.submit(_gen_analysis)
 
-                    try:
-                        chart_json = chart_future.result(timeout=ANALYSIS_TIMEOUT)
-                    except Exception:
-                        pass
+                try:
+                    chart_json = chart_future.result(timeout=ANALYSIS_TIMEOUT)
+                except Exception:
+                    pass
 
-                    try:
-                        raw = analysis_future.result(timeout=ANALYSIS_TIMEOUT)
-                        analysis = raw.strip() if raw else None
-                    except Exception:
-                        pass
+                try:
+                    analysis = analysis_future.result(timeout=ANALYSIS_TIMEOUT)
+                except Exception:
+                    pass
 
-                yield json.dumps({
-                    "type": "analysis",
-                    "analysis": analysis,
-                    "chart": chart_json,
-                }) + "\n"
+        # Serialize with default=str to handle datetime/Decimal from BigQuery
+        response_data = json.loads(json.dumps({
+            "type": "data",
+            "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
+            "sql": sql,
+            "data": data,
+            "analysis": analysis,
+            "chart": chart_json,
+        }, default=str))
 
-        except Exception as e:
-            yield json.dumps({
-                "type": "error",
-                "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
-                "sql": None,
-                "data": None,
-            }) + "\n"
+        return JSONResponse(content=response_data)
 
-    return StreamingResponse(stream_data(), media_type="application/x-ndjson")
+    except Exception as e:
+        return JSONResponse(content={
+            "type": "error",
+            "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
+            "sql": None,
+            "data": None,
+            "analysis": None,
+            "chart": None,
+        })
 
 @app.post("/api/train")
 def train(request: TrainRequest):
