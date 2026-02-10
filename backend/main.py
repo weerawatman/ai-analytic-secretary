@@ -177,7 +177,6 @@ def generate_chat_response(question: str) -> str:
 def chat(request: ChatRequest):
     question = request.question.strip()
     intent = classify_intent(question)
-    print(f"DEBUG: Question='{question}' | Intent='{intent}'")
 
     # --- Chat / Greeting (instant response) ---
     if intent == 'chat':
@@ -193,9 +192,7 @@ def chat(request: ChatRequest):
     def stream_data():
         try:
             sql = vn.generate_sql(question)
-            print(f"DEBUG: Generated SQL: {sql}")
             df = vn.run_sql(sql)
-            print(f"DEBUG: Dataframe rows: {len(df) if df is not None else 'None'}")
 
             data = []
             if df is not None and not df.empty:
@@ -221,8 +218,7 @@ def chat(request: ChatRequest):
                         code = vn.generate_plotly_code(question=question, sql=sql, df=df)
                         fig = vn.get_plotly_figure(plotly_code=code, df=df)
                         return fig.to_json() if fig else None
-                    except Exception as e:
-                        print(f"WARNING: Chart failed: {e}")
+                    except Exception:
                         return None
 
                 def _gen_analysis():
@@ -239,16 +235,14 @@ def chat(request: ChatRequest):
 
                     try:
                         chart_json = chart_future.result(timeout=ANALYSIS_TIMEOUT)
-                        print("DEBUG: Chart generated.")
                     except Exception:
-                        print("WARNING: Chart timed out or failed — skipped.")
+                        pass
 
                     try:
                         raw = analysis_future.result(timeout=ANALYSIS_TIMEOUT)
                         analysis = raw.strip() if raw else None
-                        print(f"DEBUG: Analysis: {analysis[:80] if analysis else 'None'}")
                     except Exception:
-                        print("WARNING: Analysis timed out or failed — skipped.")
+                        pass
 
                 yield json.dumps({
                     "type": "analysis",
@@ -257,7 +251,6 @@ def chat(request: ChatRequest):
                 }) + "\n"
 
         except Exception as e:
-            print(f"ERROR: Data query failed: {e}")
             yield json.dumps({
                 "type": "error",
                 "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
