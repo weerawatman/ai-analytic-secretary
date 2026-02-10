@@ -89,3 +89,11 @@ def train(request: TrainRequest):
         return {"status": "success", "message": "Training completed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/training_data")
+def get_training_data():
+    df = vn.get_training_data()
+    if df is None or df.empty:
+        return {"status": "success", "data": []}
+    data = df.to_dict(orient='records')
+    return {"status": "success", "data": data}
