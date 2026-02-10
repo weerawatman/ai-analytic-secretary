@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import os
 from vanna.ollama import Ollama
 from vanna.pgvector import PG_VectorStore
+from google.cloud import bigquery
+import pandas as pd
 
 app = FastAPI()
 
@@ -37,9 +39,21 @@ class MyVanna(PG_VectorStore, Ollama):
             print("DEBUG: PG_VectorStore initialized OK")
             Ollama.__init__(self, config=config)
             print("DEBUG: Ollama initialized OK")
+            self.bq_client = bigquery.Client.from_service_account_json('service_account.json')
+            print("DEBUG: BigQuery client initialized OK")
         except Exception as e:
             print(f"DEBUG: Error inside MyVanna __init__: {e}")
             raise e
+
+    def run_sql(self, sql: str) -> pd.DataFrame:
+        print(f"DEBUG: Executing SQL on BigQuery: {sql}")
+        try:
+            job = self.bq_client.query(sql)
+            df = job.to_dataframe()
+            return df
+        except Exception as e:
+            print(f"ERROR: BigQuery execution failed: {e}")
+            return None
 
 # Initialize Vanna (Global Instance)
 # ส่งค่า config แบบ "หว่านแห" (ป้องกัน Vanna เปลี่ยนชื่อ key)

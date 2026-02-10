@@ -14,5 +14,6 @@ sentence-transformers
 # อื่นๆ
 google-cloud-bigquery
 pandas
+pyarrow
 requests
 ollama
