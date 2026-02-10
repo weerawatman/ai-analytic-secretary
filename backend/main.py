@@ -1,9 +1,11 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import re
 import json
+import concurrent.futures
 import pandas as pd
 import plotly
 import plotly.express as px
@@ -14,7 +16,8 @@ from google.cloud import bigquery
 # --- Configuration ---
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://ollama:11434')
 POSTGRES_URL = os.getenv('POSTGRES_URL', 'postgresql://admin:admin@db:5432/ai_cockpit')
-MODEL_NAME = 'qwen2.5:14b'
+MODEL_NAME = 'qwen2.5:7b'
+ANALYSIS_TIMEOUT = 10  # seconds — skip AI tasks if they take longer
 
 # --- Custom Vanna Class ---
 class MyVanna(Ollama, PG_VectorStore):
@@ -167,77 +170,92 @@ def chat(request: ChatRequest):
     intent = classify_intent(question)
     print(f"DEBUG: Question='{question}' | Intent='{intent}'")
 
-    # --- Chat / Greeting ---
+    # --- Chat / Greeting (instant response) ---
     if intent == 'chat':
         message = generate_chat_response(question)
-        return {
+        return JSONResponse(content={
             "type": "chat",
             "message": message,
             "sql": None,
             "data": None,
-        }
+        })
 
-    # --- Data Query ---
-    try:
-        sql = vn.generate_sql(question)
-        print(f"DEBUG: Generated SQL: {sql}")
-
-        # 1. Execute SQL
-        df = vn.run_sql(sql)
-
-        data = []
-        if df is not None and not df.empty:
-            data = df.astype(str).to_dict(orient='records')
-
-        # 2. Generate Plotly Chart
-        chart_json = None
+    # --- Data Query (Streamed: data first, AI analysis second) ---
+    def stream_data():
         try:
-            if df is not None and not df.empty:
-                code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-                fig = vn.get_plotly_figure(plotly_code=code, df=df)
-                if fig is not None:
-                    chart_json = fig.to_json()
-                    print("DEBUG: Plotly chart generated successfully.")
-        except Exception as chart_err:
-            print(f"WARNING: Chart generation failed (non-fatal): {chart_err}")
-            chart_json = None
+            sql = vn.generate_sql(question)
+            print(f"DEBUG: Generated SQL: {sql}")
+            df = vn.run_sql(sql)
 
-        # 3. Generate Storytelling / AI Insight
-        analysis = None
-        try:
+            data = []
             if df is not None and not df.empty:
-                df_summary = df.head(20).to_string(index=False)
-                insight_prompt = (
-                    f"คุณเป็นนักวิเคราะห์ข้อมูลธุรกิจ ผู้ใช้ถามว่า: \"{question}\"\n"
-                    f"SQL ที่ใช้: {sql}\n"
-                    f"ผลลัพธ์ข้อมูล:\n{df_summary}\n\n"
-                    f"กรุณาวิเคราะห์ข้อมูลนี้เป็นภาษาไทย สรุปสั้น ๆ 2-3 ประโยค "
-                    f"เน้น insight ที่เป็นประโยชน์ต่อการตัดสินใจทางธุรกิจ "
-                    f"เช่น แนวโน้ม จุดเด่น หรือข้อสังเกตสำคัญ"
-                )
-                raw = vn.submit_prompt(prompt=insight_prompt)
-                analysis = raw.strip() if raw else None
-                print(f"DEBUG: Storytelling generated: {analysis[:80] if analysis else 'None'}...")
-        except Exception as insight_err:
-            print(f"WARNING: Storytelling generation failed (non-fatal): {insight_err}")
-            analysis = None
+                data = df.astype(str).to_dict(orient='records')
 
-        return {
-            "type": "data",
-            "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
-            "analysis": analysis,
-            "chart": chart_json,
-            "sql": sql,
-            "data": data,
-        }
-    except Exception as e:
-        print(f"ERROR: Data query failed: {e}")
-        return {
-            "type": "error",
-            "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
-            "sql": None,
-            "data": None,
-        }
+            # --- CHUNK 1: SQL + Data (sent immediately — no AI wait) ---
+            yield json.dumps({
+                "type": "data",
+                "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
+                "sql": sql,
+                "data": data,
+                "analysis": None,
+                "chart": None,
+            }) + "\n"
+
+            # --- CHUNK 2: Chart + Analysis (parallel AI, with timeout) ---
+            if df is not None and not df.empty:
+                chart_json = None
+                analysis = None
+
+                def _gen_chart():
+                    try:
+                        code = vn.generate_plotly_code(question=question, sql=sql, df=df)
+                        fig = vn.get_plotly_figure(plotly_code=code, df=df)
+                        return fig.to_json() if fig else None
+                    except Exception as e:
+                        print(f"WARNING: Chart failed: {e}")
+                        return None
+
+                def _gen_analysis():
+                    df_summary = df.head(5).to_string(index=False)
+                    prompt = (
+                        f"Data:\n{df_summary}\n\n"
+                        "Analyze this data in 1 short sentence (Thai). Be punchy."
+                    )
+                    return vn.submit_prompt(prompt=prompt)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    chart_future = executor.submit(_gen_chart)
+                    analysis_future = executor.submit(_gen_analysis)
+
+                    try:
+                        chart_json = chart_future.result(timeout=ANALYSIS_TIMEOUT)
+                        print("DEBUG: Chart generated.")
+                    except Exception:
+                        print("WARNING: Chart timed out or failed — skipped.")
+
+                    try:
+                        raw = analysis_future.result(timeout=ANALYSIS_TIMEOUT)
+                        analysis = raw.strip() if raw else None
+                        print(f"DEBUG: Analysis: {analysis[:80] if analysis else 'None'}")
+                    except Exception:
+                        print("WARNING: Analysis timed out or failed — skipped.")
+
+                yield json.dumps({
+                    "type": "analysis",
+                    "analysis": analysis,
+                    "chart": chart_json,
+                }) + "\n"
+
+        except Exception as e:
+            print(f"ERROR: Data query failed: {e}")
+            yield json.dumps({
+                "type": "error",
+                "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
+                "sql": None,
+                "data": None,
+            }) + "\n"
+
+    return StreamingResponse(stream_data(), media_type="application/x-ndjson")
 
 @app.post("/api/train")
 def train(request: TrainRequest):
