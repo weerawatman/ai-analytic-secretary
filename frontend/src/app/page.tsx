@@ -310,12 +310,15 @@ export default function Home() {
                   <DataTable data={msg.data} />
                 )}
 
-                {/* Empty result notice */}
-                {msg.type === "data" && (!msg.data || msg.data.length === 0) && (
-                  <p className="mt-2 text-xs text-slate-500 italic">
-                    No results returned.
-                  </p>
-                )}
+                {/* Empty result notice — only when there is truly nothing to show */}
+                {msg.type === "data" &&
+                  (!msg.data || msg.data.length === 0) &&
+                  !msg.chart &&
+                  !msg.analysis && (
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                      No results returned.
+                    </p>
+                  )}
               </div>
             </div>
           ))}
