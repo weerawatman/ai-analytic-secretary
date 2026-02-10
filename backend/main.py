@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
+import re
 import pandas as pd
 from vanna.ollama import Ollama
 from vanna.pgvector import PG_VectorStore
@@ -48,6 +50,14 @@ vn = MyVanna(config=config)
 # --- API ---
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow requests from localhost:3000
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class ChatRequest(BaseModel):
     question: str
 
@@ -56,26 +66,140 @@ class TrainRequest(BaseModel):
     documentation: str | None = None
     sql: str | None = None
 
+# --- Intent Classification (Router) ---
+GREETING_PATTERNS = [
+    r'(สวัสดี|หวัดดี|ดีจ้า|ดีค่ะ|ดีครับ)',
+    r'^(hello|hi|hey|yo)[\s!?.]*$',
+    r'good\s*(morning|afternoon|evening|night)',
+    r'(สบายดี|เป็นไง|ทำอะไรอยู่)',
+    r'(ขอบคุณ|ขอบใจ|thank|thanks)',
+    r'(bye|ลาก่อน|ไปก่อน|ไปล่ะ)',
+    r'(who are you|คุณคือใคร|คุณเป็นใคร|ชื่ออะไร|เป็นใคร)',
+    r'(help|ช่วยอะไรได้|ทำอะไรได้บ้าง)',
+    r'^(ดี|hey|ok|โอเค|เฮ้|หวัดดี)[\s!?.]*$',
+]
+
+DATA_KEYWORDS = [
+    'ยอดขาย', 'ยอด', 'ขาย', 'ลูกค้า', 'สินค้า', 'รายได้', 'กำไร', 'ต้นทุน',
+    'revenue', 'sales', 'customer', 'product', 'profit', 'cost', 'price',
+    'table', 'query', 'report', 'select', 'from', 'where',
+    'สูงสุด', 'ต่ำสุด', 'เฉลี่ย', 'รวม', 'จำนวน', 'เท่าไหร่', 'กี่',
+    'max', 'min', 'average', 'total', 'count', 'sum',
+    'order', 'ออเดอร์', 'invoice', 'payment', 'stock', 'inventory',
+    'แสดง', 'ดึงข้อมูล', 'หา', 'ค้นหา', 'รายการ', 'สรุป',
+]
+
+
+def classify_intent(question: str) -> str:
+    """Classify user intent as 'chat' or 'data'."""
+    q = question.strip().lower()
+
+    # Check data keywords first (higher priority)
+    for keyword in DATA_KEYWORDS:
+        if keyword in q:
+            return 'data'
+
+    # Check greeting/general patterns
+    for pattern in GREETING_PATTERNS:
+        if re.search(pattern, q, re.IGNORECASE):
+            return 'chat'
+
+    # Short inputs without data keywords -> chat
+    if len(q) < 15:
+        return 'chat'
+
+    # Default to data for longer queries (likely a business question)
+    return 'data'
+
+
+def detect_persona(question: str) -> tuple:
+    """Detect persona based on Thai politeness particles.
+    Returns (name, particle) tuple.
+    """
+    q = question.strip()
+    if q.endswith('ค่ะ') or q.endswith('คะ'):
+        return ('พิม', 'ค่ะ', 'คะ', 'ดิฉัน')
+    elif q.endswith('ครับ'):
+        return ('โจ', 'ครับ', 'ครับ', 'ผม')
+    else:
+        return ('AI Assistant', 'ครับ', 'ครับ', 'ผม')
+
+
+def generate_chat_response(question: str) -> str:
+    """Generate a friendly Thai chat response based on persona."""
+    q = question.strip().lower()
+    name, end_p, question_p, pronoun = detect_persona(question)
+
+    # Greeting
+    if re.search(r'(สวัสดี|hello|hi|hey|หวัดดี|ดีจ้า|ดีค่ะ|ดีครับ|^ดี)', q, re.IGNORECASE):
+        return f'สวัสดี{end_p} {pronoun}ชื่อ{name} เป็นผู้ช่วยวิเคราะห์ข้อมูลธุรกิจ{end_p} มีเรื่องข้อมูลอะไรให้ช่วยไหม{question_p}?'
+
+    # How are you
+    if re.search(r'(สบายดี|เป็นไง)', q):
+        return f'สบายดี{end_p} ขอบคุณที่ถามนะ{question_p} มีอะไรให้ช่วยวิเคราะห์ข้อมูลไหม{question_p}?'
+
+    # Thank you
+    if re.search(r'(ขอบคุณ|ขอบใจ|thank)', q, re.IGNORECASE):
+        return f'ยินดี{end_p} หากมีอะไรให้ช่วยเพิ่มเติม บอกได้เลยนะ{question_p}'
+
+    # Who are you
+    if re.search(r'(who are you|คุณคือใคร|คุณเป็นใคร|ชื่ออะไร|เป็นใคร)', q, re.IGNORECASE):
+        return f'{pronoun}ชื่อ{name}{end_p} เป็น AI ผู้ช่วยวิเคราะห์ข้อมูลธุรกิจ{end_p} สามารถถามเกี่ยวกับยอดขาย ลูกค้า สินค้า และข้อมูลอื่น ๆ ได้เลย{question_p}'
+
+    # Help / What can you do
+    if re.search(r'(help|ช่วย|ทำอะไรได้)', q, re.IGNORECASE):
+        return f'{pronoun}สามารถช่วยวิเคราะห์ข้อมูลธุรกิจได้{end_p} เช่น ถามเรื่องยอดขาย ลูกค้า สินค้าขายดี หรือสรุปข้อมูลต่าง ๆ ลองถามได้เลยนะ{question_p}'
+
+    # Bye
+    if re.search(r'(bye|ลาก่อน|ไปก่อน|ไปล่ะ)', q, re.IGNORECASE):
+        return f'ลาก่อนนะ{question_p} แล้วพบกันใหม่{end_p}'
+
+    # Default fallback
+    return f'{pronoun}ชื่อ{name}{end_p} เป็นผู้ช่วยวิเคราะห์ข้อมูลธุรกิจ{end_p} ลองถามเกี่ยวกับข้อมูลธุรกิจได้เลยนะ{question_p}'
+
+
 @app.post("/api/chat")
 def chat(request: ChatRequest):
-    # 1. Generate SQL
-    sql = vn.generate_sql(request.question)
+    question = request.question.strip()
+    intent = classify_intent(question)
+    print(f"DEBUG: Question='{question}' | Intent='{intent}'")
 
-    # 2. Execute SQL (Force use of our custom method)
-    df = vn.run_sql(sql)
+    # --- Chat / Greeting ---
+    if intent == 'chat':
+        message = generate_chat_response(question)
+        return {
+            "type": "chat",
+            "message": message,
+            "sql": None,
+            "data": None,
+        }
 
-    # 3. Format Result
-    data = []
-    if df is not None and not df.empty:
-        # Convert Timestamp/Date objects to string for JSON serialization
-        df = df.astype(str)
-        data = df.to_dict(orient='records')
+    # --- Data Query ---
+    try:
+        sql = vn.generate_sql(question)
+        print(f"DEBUG: Generated SQL: {sql}")
 
-    return {
-        "question": request.question,
-        "sql": sql,
-        "answer": data
-    }
+        df = vn.run_sql(sql)
+
+        data = []
+        if df is not None and not df.empty:
+            df = df.astype(str)
+            data = df.to_dict(orient='records')
+
+        return {
+            "type": "data",
+            "message": "นี่คือข้อมูลที่คุณขอครับ",
+            "sql": sql,
+            "data": data,
+        }
+    except Exception as e:
+        print(f"ERROR: Data query failed: {e}")
+        return {
+            "type": "error",
+            "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
+            "sql": None,
+            "data": None,
+        }
 
 @app.post("/api/train")
 def train(request: TrainRequest):
@@ -94,6 +218,6 @@ def train(request: TrainRequest):
 def get_training_data():
     df = vn.get_training_data()
     if df is None or df.empty:
-        return {"status": "success", "data": []}
-    data = df.to_dict(orient='records')
-    return {"status": "success", "data": data}
+        return []
+    # Convert DataFrame to list of dicts
+    return df.to_dict(orient='records')

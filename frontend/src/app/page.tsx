@@ -6,14 +6,61 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface Message {
   role: "user" | "assistant" | "error";
+  type?: "chat" | "data" | "error";
   content: string;
   sql?: string;
+  data?: Record<string, string>[];
 }
 
 const dataSources = [
   { name: "BigQuery", status: "connected", icon: "BQ" },
   { name: "CSV Upload", status: "ready", icon: "CSV" },
 ];
+
+/* ── Data Table Component ── */
+function DataTable({ data }: { data: Record<string, string>[] }) {
+  if (!data || data.length === 0) return null;
+  const columns = Object.keys(data[0]);
+
+  return (
+    <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">
+      <table className="w-full text-xs text-left">
+        <thead>
+          <tr className="bg-white/5 border-b border-white/10">
+            {columns.map((col) => (
+              <th
+                key={col}
+                className="px-3 py-2 font-semibold text-emerald-400 whitespace-nowrap"
+              >
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, i) => (
+            <tr
+              key={i}
+              className="border-b border-white/5 hover:bg-white/5 transition"
+            >
+              {columns.map((col) => (
+                <td
+                  key={col}
+                  className="px-3 py-2 text-slate-300 whitespace-nowrap"
+                >
+                  {row[col]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="px-3 py-1.5 text-[10px] text-slate-500 bg-white/[.02] border-t border-white/5">
+        {data.length} row{data.length !== 1 ? "s" : ""}
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -48,15 +95,21 @@ export default function Home() {
         );
       }
 
-      const data = await res.json();
+      const resData = await res.json();
 
-      if (data.error) {
-        throw new Error(data.error);
+      if (resData.type === "error") {
+        throw new Error(resData.message);
       }
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.answer, sql: data.sql },
+        {
+          role: "assistant",
+          type: resData.type,
+          content: resData.message,
+          sql: resData.sql || undefined,
+          data: resData.data || undefined,
+        },
       ]);
     } catch (err: unknown) {
       const message =
@@ -167,7 +220,7 @@ export default function Home() {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-emerald-600 text-white rounded-br-md"
                     : msg.role === "error"
@@ -175,8 +228,11 @@ export default function Home() {
                       : "bg-white/10 text-slate-200 rounded-bl-md"
                 }`}
               >
-                {msg.content}
-                {msg.sql && msg.sql !== "SQL log inside container" && (
+                {/* Message text */}
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                {/* SQL (collapsible) — only for data type */}
+                {msg.sql && (
                   <details className="mt-3 text-xs text-slate-400">
                     <summary className="cursor-pointer hover:text-slate-300 transition">
                       View SQL
@@ -185,6 +241,18 @@ export default function Home() {
                       {msg.sql}
                     </pre>
                   </details>
+                )}
+
+                {/* Data Table — only for data type */}
+                {msg.type === "data" && msg.data && msg.data.length > 0 && (
+                  <DataTable data={msg.data} />
+                )}
+
+                {/* Empty result notice */}
+                {msg.type === "data" && (!msg.data || msg.data.length === 0) && (
+                  <p className="mt-2 text-xs text-slate-500 italic">
+                    No results returned.
+                  </p>
                 )}
               </div>
             </div>
