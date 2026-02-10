@@ -7,7 +7,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 interface Message {
   role: "user" | "assistant" | "error";
   type?: "chat" | "data" | "error";
-  content: string;
+  message: string;
   sql?: string;
   data?: Record<string, string>[];
 }
@@ -78,7 +78,7 @@ export default function Home() {
     if (!question || isLoading) return;
 
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: question }]);
+    setMessages((prev) => [...prev, { role: "user", message: question }]);
     setIsLoading(true);
 
     try {
@@ -106,7 +106,7 @@ export default function Home() {
         {
           role: "assistant",
           type: resData.type,
-          content: resData.message,
+          message: resData.message || resData.answer || "",
           sql: resData.sql || undefined,
           data: resData.data || undefined,
         },
@@ -114,7 +114,7 @@ export default function Home() {
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong.";
-      setMessages((prev) => [...prev, { role: "error", content: message }]);
+      setMessages((prev) => [...prev, { role: "error", message }]);
     } finally {
       setIsLoading(false);
     }
@@ -229,7 +229,9 @@ export default function Home() {
                 }`}
               >
                 {/* Message text */}
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                {msg.message && (
+                  <p className="whitespace-pre-wrap">{msg.message}</p>
+                )}
 
                 {/* SQL (collapsible) — only for data type */}
                 {msg.sql && (
