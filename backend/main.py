@@ -1,93 +1,91 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
+import pandas as pd
 from vanna.ollama import Ollama
 from vanna.pgvector import PG_VectorStore
 from google.cloud import bigquery
-import pandas as pd
-
-app = FastAPI()
 
 # --- Configuration ---
-# อ่านค่า Environment Variable
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://ollama:11434')
-# กำหนดค่า Default ให้ชัดเจน ถ้าอ่านจาก Env ไม่ได้
-POSTGRES_URL = os.getenv('POSTGRES_URL')
-if not POSTGRES_URL:
-    POSTGRES_URL = 'postgresql://admin:admin@db:5432/ai_cockpit'
-
+POSTGRES_URL = os.getenv('POSTGRES_URL', 'postgresql://admin:admin@db:5432/ai_cockpit')
 MODEL_NAME = 'qwen2.5:14b'
 
-# --- Debug Print (เช็คค่าก่อนเริ่มระบบ) ---
-print(f"DEBUG: --- Starting Vanna Initialization ---")
-print(f"DEBUG: Ollama Host: {OLLAMA_HOST}")
-print(f"DEBUG: Postgres URL: {POSTGRES_URL}")
-print(f"DEBUG: Model Name: {MODEL_NAME}")
-
-# --- Vanna Setup ---
-class MyVanna(PG_VectorStore, Ollama):
+# --- Custom Vanna Class ---
+class MyVanna(Ollama, PG_VectorStore):
     def __init__(self, config=None):
-        if config is None:
-            config = {}
-        
-        # Print ดูว่า Config ที่ส่งเข้ามาหน้าตาเป็นยังไง
-        print(f"DEBUG: Init Config received: {config}")
+        # Initialize parent classes
+        Ollama.__init__(self, config=config)
+        PG_VectorStore.__init__(self, config=config)
 
-        # Initialize ส่วนต่างๆ
+        # Initialize BigQuery Client
         try:
-            PG_VectorStore.__init__(self, config=config)
-            print("DEBUG: PG_VectorStore initialized OK")
-            Ollama.__init__(self, config=config)
-            print("DEBUG: Ollama initialized OK")
+            print("DEBUG: Connecting to BigQuery...")
             self.bq_client = bigquery.Client.from_service_account_json('service_account.json')
-            print("DEBUG: BigQuery client initialized OK")
+            print("DEBUG: BigQuery Connected Successfully.")
         except Exception as e:
-            print(f"DEBUG: Error inside MyVanna __init__: {e}")
-            raise e
+            print(f"ERROR: Failed to connect to BigQuery: {e}")
 
     def run_sql(self, sql: str) -> pd.DataFrame:
-        print(f"DEBUG: Executing SQL on BigQuery: {sql}")
+        print(f"DEBUG: Executing SQL: {sql}")
         try:
             job = self.bq_client.query(sql)
             df = job.to_dataframe()
+            print(f"DEBUG: SQL Executed. Rows returned: {len(df)}")
             return df
         except Exception as e:
-            print(f"ERROR: BigQuery execution failed: {e}")
+            print(f"ERROR: SQL Execution failed: {e}")
             return None
 
-# Initialize Vanna (Global Instance)
-# ส่งค่า config แบบ "หว่านแห" (ป้องกัน Vanna เปลี่ยนชื่อ key)
-config_payload = {
+# --- Setup Vanna ---
+config = {
     'ollama_host': OLLAMA_HOST,
     'model': MODEL_NAME,
-    'connection_string': POSTGRES_URL,         # ชื่อมาตรฐาน
-    'postgres_connection_string': POSTGRES_URL # ชื่อเผื่อเวอร์ชันเก่า
+    'connection_string': POSTGRES_URL
 }
+vn = MyVanna(config=config)
 
-vn = MyVanna(config=config_payload)
-print("✅ Vanna initialized successfully")
+# --- API ---
+app = FastAPI()
 
-# --- API Models ---
-class Question(BaseModel):
+class ChatRequest(BaseModel):
     question: str
 
-@app.get("/")
-def read_root():
-    status = "Running" if vn else "Error: Vanna not initialized"
-    return {"status": status, "model": MODEL_NAME}
+class TrainRequest(BaseModel):
+    ddl: str | None = None
+    documentation: str | None = None
+    sql: str | None = None
 
 @app.post("/api/chat")
-def ask_ai(q: Question):
-    if not vn:
-        raise HTTPException(status_code=500, detail="Vanna AI is not initialized properly. Check backend logs.")
-    
+def chat(request: ChatRequest):
+    # 1. Generate SQL
+    sql = vn.generate_sql(request.question)
+
+    # 2. Execute SQL (Force use of our custom method)
+    df = vn.run_sql(sql)
+
+    # 3. Format Result
+    data = []
+    if df is not None and not df.empty:
+        # Convert Timestamp/Date objects to string for JSON serialization
+        df = df.astype(str)
+        data = df.to_dict(orient='records')
+
+    return {
+        "question": request.question,
+        "sql": sql,
+        "answer": data
+    }
+
+@app.post("/api/train")
+def train(request: TrainRequest):
     try:
-        # ถาม Vanna
-        answer = vn.ask(question=q.question, print_results=False)
-        return {
-            "question": q.question,
-            "answer": str(answer), 
-            "sql": "SQL log inside container" 
-        }
+        if request.ddl:
+            vn.train(ddl=request.ddl)
+        if request.documentation:
+            vn.train(documentation=request.documentation)
+        if request.sql:
+            vn.train(sql=request.sql)
+        return {"status": "success", "message": "Training completed"}
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
