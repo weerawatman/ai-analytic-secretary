@@ -6,10 +6,7 @@ import os
 import re
 import json
 import warnings
-import concurrent.futures
 import pandas as pd
-import plotly
-import plotly.express as px
 from vanna.ollama import Ollama
 from vanna.pgvector import PG_VectorStore
 from google.cloud import bigquery
@@ -189,9 +186,9 @@ def chat(request: ChatRequest):
             "type": "chat",
             "message": message,
             "sql": None,
+            "columns": [],
             "data": None,
             "analysis": None,
-            "chart": None,
         })
 
     # --- Data Query ---
@@ -200,56 +197,34 @@ def chat(request: ChatRequest):
         df = vn.run_sql(sql)
 
         data = []
+        columns = []
         if df is not None and not df.empty:
             data = df.to_dict(orient='records')
+            columns = list(df.columns)
 
         analysis = None
-        chart_json = None
 
-        # Generate chart + analysis in parallel (with timeout)
+        # Generate analysis (with timeout)
         if df is not None and not df.empty:
-            def _gen_chart():
-                try:
-                    code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-                    fig = vn.get_plotly_figure(plotly_code=code, df=df)
-                    return fig.to_json() if fig else None
-                except Exception:
-                    return None
-
-            def _gen_analysis():
-                try:
-                    df_summary = df.head(5).to_string(index=False)
-                    prompt = (
-                        f"Data:\n{df_summary}\n\n"
-                        "Summarize this data in 1 very short Thai sentence. Focus on the top performer only."
-                    )
-                    raw = vn.submit_prompt(prompt=prompt)
-                    return raw.strip() if raw else None
-                except Exception:
-                    return None
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                chart_future = executor.submit(_gen_chart)
-                analysis_future = executor.submit(_gen_analysis)
-
-                try:
-                    chart_json = chart_future.result(timeout=ANALYSIS_TIMEOUT)
-                except Exception:
-                    pass
-
-                try:
-                    analysis = analysis_future.result(timeout=ANALYSIS_TIMEOUT)
-                except Exception:
-                    pass
+            try:
+                df_summary = df.head(5).to_string(index=False)
+                prompt = (
+                    f"Data:\n{df_summary}\n\n"
+                    "Summarize this data in 1 very short Thai sentence. Focus on the top performer only."
+                )
+                raw = vn.submit_prompt(prompt=prompt)
+                analysis = raw.strip() if raw else None
+            except Exception:
+                pass
 
         # Serialize with default=str to handle datetime/Decimal from BigQuery
         response_data = json.loads(json.dumps({
             "type": "data",
             "message": "วิเคราะห์ข้อมูลเรียบร้อยครับ",
             "sql": sql,
+            "columns": columns,
             "data": data,
             "analysis": analysis,
-            "chart": chart_json,
         }, default=str))
 
         return JSONResponse(content=response_data)
@@ -259,9 +234,9 @@ def chat(request: ChatRequest):
             "type": "error",
             "message": f"ขออภัย เกิดข้อผิดพลาดในการประมวลผลคำถาม: {str(e)}",
             "sql": None,
+            "columns": [],
             "data": None,
             "analysis": None,
-            "chart": None,
         })
 
 @app.post("/api/train")

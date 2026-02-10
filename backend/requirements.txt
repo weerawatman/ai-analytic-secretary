@@ -11,8 +11,6 @@ langchain-core
 langchain-huggingface
 langchain-postgres
 sentence-transformers
-# Plotly
-plotly
 # อื่นๆ
 google-cloud-bigquery
 pandas

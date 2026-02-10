@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, FormEvent } from "react";
-import dynamic from "next/dynamic";
-
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+import { useState, useRef, useEffect, FormEvent, useMemo } from "react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -12,15 +20,98 @@ interface Message {
   type?: "chat" | "data" | "error";
   message: string;
   analysis?: string;
-  chart?: string;
+  columns?: string[];
   sql?: string;
-  data?: Record<string, string>[];
+  data?: Record<string, unknown>[];
 }
 
 const dataSources = [
   { name: "BigQuery", status: "connected", icon: "BQ" },
   { name: "CSV Upload", status: "ready", icon: "CSV" },
 ];
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+const CHART_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+
+/* ── AutoChart Component ── */
+function AutoChart({ data }: { data: Record<string, unknown>[] }) {
+  const chartConfig = useMemo(() => {
+    if (!data || data.length === 0) return null;
+
+    const firstRow = data[0];
+    const stringKeys: string[] = [];
+    const numberKeys: string[] = [];
+    const dateKeys: string[] = [];
+
+    for (const key of Object.keys(firstRow)) {
+      const val = firstRow[key];
+      if (typeof val === "number" || (typeof val === "string" && val !== "" && !isNaN(Number(val)) && !ISO_DATE_RE.test(val))) {
+        numberKeys.push(key);
+      } else if (typeof val === "string" && ISO_DATE_RE.test(val)) {
+        dateKeys.push(key);
+      } else {
+        stringKeys.push(key);
+      }
+    }
+
+    // 1 dateKey + ≥1 numberKey → LineChart
+    if (dateKeys.length >= 1 && numberKeys.length >= 1) {
+      return { type: "line" as const, xKey: dateKeys[0], yKeys: numberKeys };
+    }
+    // ≥1 stringKey + ≥1 numberKey → BarChart
+    if (stringKeys.length >= 1 && numberKeys.length >= 1) {
+      return { type: "bar" as const, xKey: stringKeys[0], yKeys: [numberKeys[0]] };
+    }
+    // fallback — let DataTable handle it
+    return null;
+  }, [data]);
+
+  if (!chartConfig) return null;
+
+  // Coerce number strings to actual numbers for recharts
+  const chartData = data.map((row) => {
+    const out: Record<string, unknown> = { ...row };
+    for (const k of chartConfig.yKeys) {
+      const v = out[k];
+      if (typeof v === "string") out[k] = Number(v);
+    }
+    return out;
+  });
+
+  return (
+    <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3 overflow-hidden">
+      <ResponsiveContainer width="100%" height={320}>
+        {chartConfig.type === "line" ? (
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+            <XAxis dataKey={chartConfig.xKey} tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
+            <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
+            <Tooltip
+              contentStyle={{ backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: "#94a3b8" }}
+            />
+            {chartConfig.yKeys.map((key, i) => (
+              <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+            ))}
+          </LineChart>
+        ) : (
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+            <XAxis dataKey={chartConfig.xKey} tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
+            <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} />
+            <Tooltip
+              contentStyle={{ backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: "#94a3b8" }}
+            />
+            {chartConfig.yKeys.map((key, i) => (
+              <Bar key={key} dataKey={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
+            ))}
+          </BarChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 /* ── Insight Box Component ── */
 function InsightBox({ analysis }: { analysis: string }) {
@@ -39,34 +130,8 @@ function InsightBox({ analysis }: { analysis: string }) {
   );
 }
 
-/* ── Plotly Chart Component ── */
-function ChartBox({ chartJson }: { chartJson: string }) {
-  try {
-    const fig = JSON.parse(chartJson);
-    return (
-      <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-2 overflow-hidden">
-        <Plot
-          data={fig.data}
-          layout={{
-            ...fig.layout,
-            paper_bgcolor: "rgba(0,0,0,0)",
-            plot_bgcolor: "rgba(0,0,0,0)",
-            font: { color: "#94a3b8", size: 12 },
-            margin: { l: 50, r: 30, t: 40, b: 50 },
-            autosize: true,
-          }}
-          config={{ responsive: true, displayModeBar: false }}
-          style={{ width: "100%", height: "380px" }}
-        />
-      </div>
-    );
-  } catch {
-    return null;
-  }
-}
-
 /* ── Data Table Component ── */
-function DataTable({ data }: { data: Record<string, string>[] }) {
+function DataTable({ data }: { data: Record<string, unknown>[] }) {
   if (!data || data.length === 0) return null;
   const columns = Object.keys(data[0]);
 
@@ -96,7 +161,7 @@ function DataTable({ data }: { data: Record<string, string>[] }) {
                   key={col}
                   className="px-3 py-2 text-slate-300 whitespace-nowrap"
                 >
-                  {row[col]}
+                  {String(row[col] ?? "")}
                 </td>
               ))}
             </tr>
@@ -156,7 +221,7 @@ export default function Home() {
           type: resData.type,
           message: resData.message || resData.answer || "",
           analysis: resData.analysis || undefined,
-          chart: resData.chart || undefined,
+          columns: resData.columns || undefined,
           sql: resData.sql || undefined,
           data: resData.data || undefined,
         },
@@ -288,9 +353,9 @@ export default function Home() {
                   <InsightBox analysis={msg.analysis} />
                 )}
 
-                {/* Plotly Chart — rendered between insight and table */}
-                {msg.type === "data" && msg.chart && (
-                  <ChartBox chartJson={msg.chart} />
+                {/* AutoChart — rendered between insight and SQL */}
+                {msg.type === "data" && msg.data && msg.data.length > 0 && (
+                  <AutoChart data={msg.data} />
                 )}
 
                 {/* SQL (collapsible) — only for data type */}
@@ -313,7 +378,6 @@ export default function Home() {
                 {/* Empty result notice — only when there is truly nothing to show */}
                 {msg.type === "data" &&
                   (!msg.data || msg.data.length === 0) &&
-                  !msg.chart &&
                   !msg.analysis && (
                     <p className="mt-2 text-xs text-slate-500 italic">
                       No results returned.
