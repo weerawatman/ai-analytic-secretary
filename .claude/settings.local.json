@@ -30,7 +30,8 @@
       "Bash(git -C \"C:\\\\Projects\\\\ai-analytic-secretary\" log --oneline -5)",
       "Bash(git -C \"C:\\\\Projects\\\\ai-analytic-secretary\" add backend/main.py backend/requirements.txt frontend/package.json frontend/package-lock.json frontend/src/app/page.tsx)",
       "Bash(git -C \"C:\\\\Projects\\\\ai-analytic-secretary\" commit -m \"$\\(cat <<''EOF''\nrefactor: replace server-side Plotly with client-side Recharts\n\nRemove the slow LLM-based Plotly chart generation pipeline \\(generate_plotly_code\n→ exec\\(\\)\\) and replace it with deterministic client-side charting using Recharts.\n\nBackend: remove plotly imports, _gen_chart\\(\\), ThreadPoolExecutor, and chart\nfield from all responses; add columns field; simplify to direct analysis call.\n\nFrontend: remove plotly.js/react-plotly.js \\(~3.5MB\\), add recharts \\(~200KB\\);\nreplace ChartBox with AutoChart that uses heuristics \\(date→LineChart,\nstring+number→BarChart\\) to render charts from raw data.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git -C \"C:\\\\Projects\\\\ai-analytic-secretary\" push)"
+      "Bash(git -C \"C:\\\\Projects\\\\ai-analytic-secretary\" push)",
+      "Bash(start:*)"
     ]
   }
 }
